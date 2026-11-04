@@ -1,0 +1,545 @@
+# Cron schedules, as crontab writes them: "30 9 * * mon-fri" read, whether a time fits it, the next times it
+# comes round, and what it says in words. With dates.moth's dates and times, in Moth alone.
+#
+#   use the package "cron" as cron
+#   use "dates.moth" as dates
+#   say cron's matches("30 9 * * mon-fri", dates's read_date("2026-11-04 09:30"))   # yes: a Wednesday
+#   set next to cron's next_after("0 0 1 * *", dates's now())     # the next 1st of a month, at midnight
+#   say dates's format_date(next, "YYYY-MM-DD hh:mm")
+#   for each t in cron's next_times("*/15 9-17 * * *", dates's now(), 4)
+#       say dates's format_date(t, "hh:mm")
+#   end
+#   say cron's described("30 9 * * 1-5")                          # at 09:30, Monday to Friday
+#
+# A schedule is five fields: minute (0-59), hour (0-23), day of the month (1-31), month (1-12, or jan-dec)
+# and day of the week (0-7, 0 and 7 both Sunday, or sun-sat). Each is * (any), a number, a range (1-5), a list
+# (1,15), and any of them stepped: */15, 9-17/2. @yearly (or @annually), @monthly, @weekly, @daily (or
+# @midnight) and @hourly stand for the schedules they name. When both the day of the month and the day of the
+# week are given, a day fits if it's either, as cron has it.
+#
+# A time is a record with year, month, day, hour and minute (a date with none of those is midnight); seconds
+# are left out. next_after gives the first time after the one given that fits, with second 0; a schedule no
+# day fits (31 2 *: 31 February) fails, saying so. seconds_until(schedule, time) is how long to wait for it. parse(words) gives a record of each field's numbers, and
+# fails with what's wrong; is_valid(words) asks first.
+
+# a schedule's fields: records of the numbers each lets through, and whether its days were given
+to parse with words
+    set given to cron_trimmed(lowercase of ("" + words))
+    set expanded to cron_macro(given)
+    set fields to cron_words(expanded)
+    if length of fields is not 5
+        fail with "'" + words + "' isn't a cron schedule: it needs 5 fields (minute, hour, day, month, weekday), "
+            + "not " + length of fields
+    end
+    set minutes to cron_field(words, item 1 of fields, "minute", 0, 59, nothing)
+    set hours to cron_field(words, item 2 of fields, "hour", 0, 23, nothing)
+    set days to cron_field(words, item 3 of fields, "day", 1, 31, nothing)
+    set months to cron_field(words, item 4 of fields, "month", 1, 12, cron_month_names())
+    set weekdays to cron_field(words, item 5 of fields, "weekday", 0, 7, cron_weekday_names())
+    # 7 is Sunday, as 0 is
+    if 7 is in weekdays
+        set item 0 of weekdays to yes
+        remove 7 from weekdays
+    end
+    return record with minutes minutes, hours hours, days days, months months, weekdays weekdays,
+        any_day item 3 of fields is "*", any_weekday item 5 of fields is "*", written given
+end
+
+to is_valid with words
+    try
+        parse(words)
+    if it fails
+        return no
+    end
+    return yes
+end
+
+# whether the time fits the schedule (to the minute)
+to matches with schedule, time
+    set s to cron_schedule(schedule)
+    set t to cron_time(time)
+    return t's minute is in s's minutes and t's hour is in s's hours and cron_day_fits(s, t)
+end
+
+# the first time after `time` that fits, to the minute
+to next_after with schedule, time
+    set s to cron_schedule(schedule)
+    set t to cron_time(time)
+    # the minute after
+    set year to t's year
+    set month to t's month
+    set day to t's day
+    set hour to t's hour
+    set minute to t's minute + 1
+    set days_looked to 0
+    repeat while yes
+        if minute is greater than 59
+            set minute to 0
+            add 1 to hour
+        end
+        if hour is greater than 23
+            set hour to 0
+            set minute to 0
+            set moved to cron_date_of(cron_day_number(year, month, day) + 1)
+            set year to moved's year
+            set month to moved's month
+            set day to moved's day
+            add 1 to days_looked
+        end
+        if days_looked is greater than 366 * 5
+            fail with "the schedule '" + s's written + "' never comes round: no day fits it"
+        end
+        set here to record with year year, month month, day day, hour hour, minute minute, second 0
+        if not (month is in s's months)
+            # to the first day of the next month
+            set moved to record with year year, month month + 1, day 1
+            if month is 12
+                set moved to record with year year + 1, month 1, day 1
+            end
+            set days_looked to days_looked + cron_day_number(moved's year, moved's month, 1)
+                - cron_day_number(year, month, day)
+            set year to moved's year
+            set month to moved's month
+            set day to 1
+            set hour to 0
+            set minute to 0
+        else if not cron_day_fits(s, here)
+            set hour to 24
+        else if not (hour is in s's hours)
+            add 1 to hour
+            set minute to 0
+        else if not (minute is in s's minutes)
+            add 1 to minute
+        else
+            return here
+        end
+    end
+end
+
+# the next `count` times after `time` that fit
+to next_times with schedule, time, count
+    set s to cron_schedule(schedule)
+    set made to empty list
+    set t to time
+    repeat count times
+        set t to next_after(s, t)
+        add t to made
+    end
+    return made
+end
+
+# how many seconds from `time` (to its second, if it has one) to the next time that fits: what to wait
+to seconds_until with schedule, time
+    return cron_seconds_of(next_after(schedule, time)) - cron_seconds_of(time)
+end
+
+to cron_seconds_of with time
+    set made to cron_day_number(time's year, time's month, time's day) * 86400
+    try
+        set made to made + time's hour * 3600 + time's minute * 60
+    if it fails
+        return made
+    end
+    try
+        set made to made + time's second
+    if it fails
+        return made
+    end
+    return made
+end
+
+to cron_schedule with schedule
+    try
+        if schedule's minutes is not nothing
+            return schedule
+        end
+    if it fails
+        return parse(schedule)
+    end
+    return parse(schedule)
+end
+
+to cron_time with time
+    set made to record with year time's year, month time's month, day time's day, hour 0, minute 0
+    try
+        set made's hour to time's hour
+        set made's minute to time's minute
+    if it fails
+        set made's hour to 0
+        set made's minute to 0
+    end
+    return made
+end
+
+to cron_day_fits with s, t
+    if not (t's month is in s's months)
+        return no
+    end
+    # 1 January 1970 was a Thursday, 4
+    set weekday to remainder of (cron_day_number(t's year, t's month, t's day) + 4) divided by 7
+    set day_ok to t's day is in s's days
+    set weekday_ok to weekday is in s's weekdays
+    if s's any_day and s's any_weekday
+        return yes
+    else if s's any_day
+        return weekday_ok
+    else if s's any_weekday
+        return day_ok
+    end
+    return day_ok or weekday_ok
+end
+
+# ---------- reading a field ----------
+
+to cron_macro with given
+    match given
+        when "@yearly", "@annually"
+            return "0 0 1 1 *"
+        when "@monthly"
+            return "0 0 1 * *"
+        when "@weekly"
+            return "0 0 * * 0"
+        when "@daily", "@midnight"
+            return "0 0 * * *"
+        when "@hourly"
+            return "0 * * * *"
+    end
+    if length of given is greater than 0 and item 1 of given is "@"
+        fail with "'" + given + "' isn't a schedule cron knows: @yearly, @monthly, @weekly, @daily or @hourly"
+    end
+    return given
+end
+
+# the numbers a field lets through, as a dictionary of each to yes
+to cron_field with words, field, what, low, high, names
+    set made to empty dictionary
+    for each part in split field by ","
+        set step to 1
+        set range_part to part
+        set slash to position of "/" in part
+        if slash is greater than 0
+            set step to cron_number(words, cron_slice(part, slash + 1, length of part), what, nothing)
+            if step is less than 1
+                fail with "'" + words + "' isn't a cron schedule: a step of the " + what + " is at least 1"
+            end
+            set range_part to cron_slice(part, 1, slash - 1)
+        end
+        set first to low
+        set last to high
+        if range_part is "*"
+            set first to low
+        else
+            set dash to position of "-" in range_part
+            if dash is greater than 1
+                set first to cron_number(words, cron_slice(range_part, 1, dash - 1), what, names)
+                set last to cron_number(words, cron_slice(range_part, dash + 1, length of range_part), what, names)
+            else
+                set first to cron_number(words, range_part, what, names)
+                if slash is 0
+                    set last to first
+                end
+            end
+        end
+        for each n in list of first, last
+            if n is less than low or n is greater than high
+                fail with "'" + words + "' isn't a cron schedule: the " + what + " goes from " + low + " to " + high
+                    + ", not " + n
+            end
+        end
+        if first is greater than last
+            fail with "'" + words + "' isn't a cron schedule: the " + what + " range " + range_part
+                + " goes backwards"
+        end
+        set n to first
+        repeat while n is at most last
+            set item n of made to yes
+            set n to n + step
+        end
+    end
+    return made
+end
+
+to cron_number with words, written, what, names
+    if names is not nothing and written is in names
+        return item written of names
+    end
+    if written is ""
+        fail with "'" + words + "' isn't a cron schedule: its " + what + " has an empty part"
+    end
+    for each c in written
+        if not (c is in "0123456789")
+            fail with "'" + words + "' isn't a cron schedule: '" + written + "' isn't a " + what
+        end
+    end
+    return number of written
+end
+
+to cron_month_names
+    return dictionary where "jan" is 1, "feb" is 2, "mar" is 3, "apr" is 4, "may" is 5, "jun" is 6, "jul" is 7,
+        "aug" is 8, "sep" is 9, "oct" is 10, "nov" is 11, "dec" is 12
+end
+
+to cron_weekday_names
+    return dictionary where "sun" is 0, "mon" is 1, "tue" is 2, "wed" is 3, "thu" is 4, "fri" is 5, "sat" is 6
+end
+
+# ---------- in words ----------
+
+# what a schedule says, in words: "at 09:30, Monday to Friday", "every 15 minutes", "at 00:00, on day 1 of the
+# month"
+to described with schedule
+    set s to cron_schedule(schedule)
+    set minutes to cron_sorted_keys(s's minutes)
+    set hours to cron_sorted_keys(s's hours)
+    set all_minutes to length of minutes is 60
+    set all_hours to length of hours is 24
+    set minute_step to cron_step_of(minutes, 0, 59)
+    set hour_step to cron_step_of(hours, 0, 23)
+    set said to ""
+    if length of minutes is 1
+        set past to "on the hour"
+        if item 1 of minutes is not 0
+            set past to "at " + item 1 of minutes + " minutes past"
+        end
+        if all_hours
+            set said to "every hour, " + past
+        else if hour_step is not nothing
+            set said to "every " + hour_step + " hours, " + past
+        else if length of hours is at most 6
+            set times to empty list
+            for each h in hours
+                add cron_two(h) + ":" + cron_two(item 1 of minutes) to times
+            end
+            set said to "at " + cron_listed(times)
+        else
+            set said to "every hour, " + past + ", " + cron_hours_words(hours)
+        end
+    else
+        if all_minutes
+            set said to "every minute"
+        else if minute_step is not nothing
+            set said to "every " + minute_step + " minutes"
+        else
+            set said to "at minutes " + cron_listed(cron_ranges(minutes, nothing)) + " past the hour"
+        end
+        if hour_step is not nothing
+            set said to said + ", every " + hour_step + " hours"
+        else if not all_hours
+            set said to said + ", " + cron_hours_words(hours)
+        end
+    end
+    set weekday_words to ""
+    if not s's any_weekday
+        # Monday first, and Sunday last, as 7
+        set shown_days to empty list
+        for each n in cron_sorted_keys(s's weekdays)
+            if n is 0
+                add 7 to shown_days
+            else
+                add n to shown_days
+            end
+        end
+        set weekday_words to cron_listed(cron_ranges(shown_days in order, cron_weekday_words()))
+    end
+    set day_words to ""
+    if not s's any_day
+        set days to cron_sorted_keys(s's days)
+        set day_words to "on day " + item 1 of days + " of the month"
+        if length of days is greater than 1
+            set day_words to "on days " + cron_listed(cron_ranges(days, nothing)) + " of the month"
+        end
+    end
+    if weekday_words is not "" and day_words is not ""
+        set said to said + ", " + weekday_words + ", or " + day_words
+    else if weekday_words is not ""
+        set said to said + ", " + weekday_words
+    else if day_words is not ""
+        set said to said + ", " + day_words
+    else if length of minutes is 1 and length of hours is at most 6 and hour_step is nothing and not all_hours
+        set said to said + " every day"
+    end
+    set months to cron_sorted_keys(s's months)
+    if length of months is less than 12
+        set said to said + ", in " + cron_listed(cron_ranges(months, cron_month_words()))
+    end
+    return said
+end
+
+# the hours a schedule runs in: from 09:00 to 17:59, and others after "and"
+to cron_hours_words with hours
+    set shown to empty list
+    set k to 1
+    repeat while k is at most length of hours
+        set first to item k of hours
+        set last to first
+        repeat while k + 1 is at most length of hours and item (k + 1) of hours is last + 1
+            add 1 to k
+            set last to item k of hours
+        end
+        add cron_two(first) + ":00 to " + cron_two(last) + ":59" to shown
+        add 1 to k
+    end
+    return "from " + cron_listed(shown)
+end
+
+# n, if the numbers are every nth from low to high (and n is more than 1)
+to cron_step_of with numbers, low, high
+    if length of numbers is less than 2 or item 1 of numbers is not low
+        return nothing
+    end
+    set step to (item 2 of numbers) - (item 1 of numbers)
+    if step is less than 2
+        return nothing
+    end
+    set k to 1
+    for each n in numbers
+        if n is not low + (k - 1) * step
+            return nothing
+        end
+        add 1 to k
+    end
+    if high - item (length of numbers) of numbers is at least step
+        return nothing
+    end
+    return step
+end
+
+# numbers next to each other as one range, "1 to 5", each written with its word if there are words
+to cron_ranges with numbers, words
+    set made to empty list
+    set k to 1
+    repeat while k is at most length of numbers
+        set first to item k of numbers
+        set last to first
+        repeat while k + 1 is at most length of numbers and item (k + 1) of numbers is last + 1
+            add 1 to k
+            set last to item k of numbers
+        end
+        if last is greater than first + 1
+            add cron_word(first, words) + " to " + cron_word(last, words) to made
+        else if last is first + 1
+            add cron_word(first, words) to made
+            add cron_word(last, words) to made
+        else
+            add cron_word(first, words) to made
+        end
+        add 1 to k
+    end
+    return made
+end
+
+to cron_word with n, words
+    if words is nothing
+        return "" + n
+    end
+    return item (n + 1) of words
+end
+
+to cron_weekday_words
+    return list of "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"
+end
+
+to cron_month_words
+    return list of "", "January", "February", "March", "April", "May", "June", "July", "August", "September",
+        "October", "November", "December"
+end
+
+to cron_listed with things
+    if length of things is 0
+        return ""
+    else if length of things is 1
+        return item 1 of things
+    end
+    return (join (items 1 to length of things - 1 of things) with ", ") + " and " + item (length of things)
+        of things
+end
+
+to cron_sorted_keys with numbers
+    set made to empty list
+    for each n in keys of numbers
+        add n to made
+    end
+    return made in order
+end
+
+to cron_two with n
+    if n is less than 10
+        return "0" + n
+    end
+    return "" + n
+end
+
+# ---------- days ----------
+
+# days since 1 January 1970, as dates.moth's day_number counts them
+to cron_day_number with year, month, day
+    set y to year
+    if month is at most 2
+        set y to y - 1
+    end
+    set era to (y / 400) rounded down
+    set in_era to y - era * 400
+    set from_march to remainder of (month + 9) divided by 12
+    set before_month to ((153 * from_march + 2) / 5) rounded down
+    set leap_days to (in_era / 4) rounded down
+    set centuries to (in_era / 100) rounded down
+    return era * 146097 + in_era * 365 + leap_days - centuries + before_month + day - 1 - 719468
+end
+
+# the date that many days after 1 January 1970: a record of its year, month and day
+to cron_date_of with n
+    set z to n + 719468
+    set era to (z / 146097) rounded down
+    set in_era to z - era * 146097
+    set a to (in_era / 1460) rounded down
+    set b to (in_era / 36524) rounded down
+    set c to (in_era / 146096) rounded down
+    set year_in_era to ((in_era - a + b - c) / 365) rounded down
+    set year to year_in_era + era * 400
+    set four to (year_in_era / 4) rounded down
+    set hundred to (year_in_era / 100) rounded down
+    set in_year to in_era - (365 * year_in_era + four - hundred)
+    set from_march to ((5 * in_year + 2) / 153) rounded down
+    set before_month to ((153 * from_march + 2) / 5) rounded down
+    set day to in_year - before_month + 1
+    set month to from_march + 3
+    if from_march is at least 10
+        set month to from_march - 9
+    end
+    if month is at most 2
+        set year to year + 1
+    end
+    return record with year year, month month, day day
+end
+
+# ---------- text ----------
+
+to cron_words with words
+    set made to empty list
+    for each word in split words by " "
+        if word is not ""
+            add word to made
+        end
+    end
+    return made
+end
+
+to cron_trimmed with words
+    set made to join (split words by "\t") with " "
+    set from to 1
+    set upto to length of made
+    repeat while from is at most upto and item from of made is " "
+        add 1 to from
+    end
+    repeat while upto is at least from and item upto of made is " "
+        set upto to upto - 1
+    end
+    return cron_slice(made, from, upto)
+end
+
+to cron_slice with words, from, upto
+    if from is greater than upto or from is greater than length of words
+        return ""
+    end
+    return items from to upto of words
+end

@@ -1,0 +1,126 @@
+# cron.moth's tests: moth test cron.test.moth
+
+use "cron.moth" as cron
+use "dates.moth" as dates
+
+to at with words
+    return dates's read_date(words)
+end
+
+to written with t
+    return dates's format_date(t, "YYYY-MM-DD hh:mm")
+end
+
+to keys_in with numbers
+    set made to empty list
+    for each n in keys of numbers
+        add n to made
+    end
+    return made in order
+end
+
+to test_reading
+    set s to cron's parse("*/15 9-17 1,15 jan-mar mon-fri")
+    expect keys_in(s's minutes) is list of 0, 15, 30, 45
+    expect keys_in(s's hours) is list of 9, 10, 11, 12, 13, 14, 15, 16, 17
+    expect keys_in(s's days) is list of 1, 15
+    expect keys_in(s's months) is list of 1, 2, 3
+    expect keys_in(s's weekdays) is list of 1, 2, 3, 4, 5
+    expect keys_in(cron's parse("0 0 * * 7")'s weekdays) is list of 0 # 7 is Sunday, as 0 is
+    expect keys_in(cron's parse("0 0 * * 5-7")'s weekdays) is list of 0, 5, 6
+    expect keys_in(cron's parse("5/20 * * * *")'s minutes) is list of 5, 25, 45
+    expect keys_in(cron's parse("0-10/5 * * * *")'s minutes) is list of 0, 5, 10
+    expect keys_in(cron's parse("@hourly")'s minutes) is list of 0
+    expect keys_in(cron's parse("  0   12 * * SUN ")'s weekdays) is list of 0
+end
+
+to test_schedules_that_arent
+    expect cron's is_valid("* * * * *")
+    for each bad in list of "", "* * * *", "* * * * * *", "60 * * * *", "* 24 * * *", "* * 0 * *", "* * * 13 *",
+        "* * * * 8", "5-1 * * * *", "*/0 * * * *", "a * * * *", "1,,2 * * * *", "@sometimes"
+        expect not cron's is_valid(bad)
+    end
+    try
+        cron's parse("61 * * * *")
+        expect no
+    if it fails with why
+        expect why is "'61 * * * *' isn't a cron schedule: the minute goes from 0 to 59, not 61"
+    end
+    try
+        cron's parse("* * *")
+        expect no
+    if it fails with why
+        expect why is "'* * *' isn't a cron schedule: it needs 5 fields (minute, hour, day, month, weekday), not 3"
+    end
+end
+
+to test_matching
+    expect cron's matches("30 9 * * mon-fri", at("2026-11-04 09:30")) # a Wednesday
+    expect not cron's matches("30 9 * * mon-fri", at("2026-11-07 09:30")) # a Saturday
+    expect not cron's matches("30 9 * * *", at("2026-11-04 09:31"))
+    expect cron's matches("0 0 * * *", at("2026-11-04")) # a date alone is midnight
+    expect cron's matches("* * * * *", at("2026-02-28 23:59"))
+    # with both days given, either will do
+    expect cron's matches("0 0 1 * mon", at("2026-11-01")) # the 1st, a Sunday
+    expect cron's matches("0 0 1 * mon", at("2026-11-02")) # a Monday
+    expect not cron's matches("0 0 1 * mon", at("2026-11-03"))
+    expect cron's matches(cron's parse("@yearly"), at("2027-01-01 00:00"))
+end
+
+to test_next_times
+    set now to at("2026-11-04 10:17")
+    expect written(cron's next_after("*/15 * * * *", now)) is "2026-11-04 10:30"
+    expect written(cron's next_after("30 9 * * *", now)) is "2026-11-05 09:30"
+    expect written(cron's next_after("0 0 1 * *", now)) is "2026-12-01 00:00"
+    expect written(cron's next_after("@yearly", now)) is "2027-01-01 00:00"
+    expect written(cron's next_after("30 9 * * mon-fri", at("2026-11-06 12:00"))) is "2026-11-09 09:30" # past the weekend
+    expect written(cron's next_after("0 12 29 2 *", now)) is "2028-02-29 12:00" # the next leap day
+    expect written(cron's next_after("17 10 * * *", now)) is "2026-11-05 10:17" # after, not at
+    expect written(cron's next_after("59 23 31 12 *", at("2026-12-31 23:59"))) is "2027-12-31 23:59"
+    set times to cron's next_times("0 9-17/4 * * *", now, 4)
+    set shown to empty list
+    for each t in times
+        add written(t) to shown
+    end
+    expect shown is list of "2026-11-04 13:00", "2026-11-04 17:00", "2026-11-05 09:00", "2026-11-05 13:00"
+    try
+        cron's next_after("0 0 31 2 *", now)
+        expect no
+    if it fails with why
+        expect why is "the schedule '0 0 31 2 *' never comes round: no day fits it"
+    end
+end
+
+to test_seconds_until
+    expect cron's seconds_until("0 * * * *", at("2026-11-04 10:17")) is 43 * 60
+    expect cron's seconds_until("0 * * * *", record with year 2026, month 11, day 4, hour 10, minute 17, second 30) is 43 * 60 - 30
+    expect cron's seconds_until("0 0 * * *", at("2026-11-04")) is 86400
+end
+
+to test_described
+    expect cron's described("* * * * *") is "every minute"
+    expect cron's described("*/15 * * * *") is "every 15 minutes"
+    expect cron's described("0 * * * *") is "every hour, on the hour"
+    expect cron's described("30 * * * *") is "every hour, at 30 minutes past"
+    expect cron's described("30 9 * * *") is "at 09:30 every day"
+    expect cron's described("30 9 * * 1-5") is "at 09:30, Monday to Friday"
+    expect cron's described("0 9,17 * * *") is "at 09:00 and 17:00 every day"
+    expect cron's described("0 0 1 * *") is "at 00:00, on day 1 of the month"
+    expect cron's described("0 0 1,15 * *") is "at 00:00, on days 1 and 15 of the month"
+    expect cron's described("0 0 1 1 *") is "at 00:00, on day 1 of the month, in January"
+    expect cron's described("*/10 9-17 * * mon,wed,fri") is "every 10 minutes, from 09:00 to 17:59, Monday, Wednesday and Friday"
+    expect cron's described("0 */2 * * *") is "every 2 hours, on the hour"
+    expect cron's described("0,30 * * * sat,sun") is "every 30 minutes, Saturday and Sunday"
+    expect cron's described("5,20 * * * *") is "at minutes 5 and 20 past the hour"
+    expect cron's described("0 0 1 * mon") is "at 00:00, Monday, or on day 1 of the month"
+    expect cron's described("@weekly") is "at 00:00, Sunday"
+end
+
+to test_days_as_dates_has_them
+    for each d in list of (dates's date(1970, 1, 1)), (dates's date(2000, 2, 29)), (dates's date(2026, 11, 4)),
+        (dates's date(1969, 12, 31)), (dates's date(2100, 3, 1)), (dates's date(2024, 12, 31))
+        set n to cron's cron_day_number(d's year, d's month, d's day)
+        expect n is dates's day_number(d)
+        expect cron's cron_date_of(n) is d
+    end
+end
