@@ -1,8 +1,8 @@
 # Cron schedules, as crontab writes them: "30 9 * * mon-fri" read, whether a time fits it, the next times it
-# comes round, and what it says in words. With dates.moth's dates and times, in Moth alone.
+# comes round, and what it says in words. With dates.folio's dates and times, in Folio alone.
 #
 #   use the package "cron" as cron
-#   use "dates.moth" as dates
+#   use "dates.folio" as dates
 #   say cron's matches("30 9 * * mon-fri", dates's read_date("2026-11-04 09:30"))   # yes: a Wednesday
 #   set next to cron's next_after("0 0 1 * *", dates's now())     # the next 1st of a month, at midnight
 #   say dates's format_date(next, "YYYY-MM-DD hh:mm")
@@ -471,7 +471,7 @@ end
 
 # ---------- days ----------
 
-# days since 1 January 1970, as dates.moth's day_number counts them
+# days since 1 January 1970, as dates.folio's day_number counts them
 to cron_day_number with year, month, day
     set y to year
     if month is at most 2

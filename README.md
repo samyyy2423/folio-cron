@@ -1,16 +1,16 @@
 # cron
 
-Cron schedules for [Moth](https://github.com/samyyy2423/moth) programs, as crontab writes them:
+Cron schedules for [Folio](https://github.com/samyyy2423/folio) programs, as crontab writes them:
 `"30 9 * * mon-fri"` read, whether a time fits it, the next times it comes round, and what it says in words.
-With `dates.moth`'s dates and times, in Moth alone.
+With `dates.folio`'s dates and times, in Folio alone.
 
 ```text
-moth add cron
+folio add cron
 ```
 
 ```
 use the package "cron" as cron
-use "dates.moth" as dates
+use "dates.folio" as dates
 
 say cron's described("30 9 * * mon-fri")                        # at 09:30, Monday to Friday
 say cron's matches("30 9 * * mon-fri", dates's read_date("2026-11-04 09:30"))   # yes: a Wednesday
@@ -51,16 +51,16 @@ a list (`1,15`), and any of them stepped: `*/15`, `9-17/2`. `@yearly` (or `@annu
 `@daily` (or `@midnight`) and `@hourly` stand for the schedules they name. When both the day of the month and
 the day of the week are given, a day fits if it's either, as cron has it.
 
-A time is a record with year, month, day, hour and minute, as `dates.moth`'s `now()` and `read_date` make
+A time is a record with year, month, day, hour and minute, as `dates.folio`'s `now()` and `read_date` make
 them; a date with no time is midnight. A schedule no day fits, such as `0 0 31 2 *` (31 February), fails in
 `next_after`, saying so.
 
 ## Tests
 
 ```text
-moth test cron.test.moth
+folio test cron.test.folio
 ```
 
 ## License
 
-Apache License 2.0, as Moth is: see [LICENSE](LICENSE).
+Apache License 2.0, as Folio is: see [LICENSE](LICENSE).

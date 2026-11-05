@@ -1,7 +1,7 @@
-# cron.moth's tests: moth test cron.test.moth
+# cron.folio's tests: folio test cron.test.folio
 
-use "cron.moth" as cron
-use "dates.moth" as dates
+use "cron.folio" as cron
+use "dates.folio" as dates
 
 to at with words
     return dates's read_date(words)
